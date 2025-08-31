@@ -6,10 +6,11 @@ st.write("API Key found:", bool(st.secrets.get("sk-proj-AM8mrBdKxgBFXZP-9cDFoIqV
 
 # ---------------- CONFIG ----------------
 # Store API key in Streamlit Secrets for security
-if "OPENAI_API_KEY" in st.secrets:
-    client = OpenAI(api_key=st.secrets["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"])
-else:
-    client = None
+OPENAI_API_KEY = st.secrets["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"]
+
+# Initialize OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
+
 
 # ---------------- HELPER FUNCTIONS ----------------
 def safe_chatbot_call(user_input):
