@@ -1,56 +1,83 @@
 import streamlit as st
-from openai import OpenAI
+from openai import OpenAI, RateLimitError, AuthenticationError
+import re
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+# ---------------- CONFIG ----------------
+# Store API key in Streamlit Secrets for security
+OPENAI_API_KEY = st.secrets.get("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", None)
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+# ---------------- HELPER FUNCTIONS ----------------
+def safe_chatbot_call(user_input):
+    """Try OpenAI API; if quota exceeded, return mock reply"""
+    if not client:
+        return "⚠️ No API key found. Running in demo mode."
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
-
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
-
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
+                {
+                    "role": "system",
+                    "content": """
+You are ChaufX Concierge, a premium chauffeur booking assistant.
+1. Ride Booking: confirm with ✅ if pickup, drop, date, time provided.
+2. FAQ: answer pricing, fleet, cancellation, payment policies politely and concisely.
+"""
+                },
+                {"role": "user", "content": user_input}
+            ]
         )
+        return response.choices[0].message.content
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+    except RateLimitError:
+        # Demo fallback response
+        return f"✅ (Demo Mode) Ride booked! Pickup: Connaught Place, Drop: Delhi Airport, Date: Tomorrow, Time: 8 AM.\nDriver: Rajesh Kumar 🚖, Car: Mercedes S-Class"
+    except AuthenticationError:
+        return "⚠️ Invalid API key. Please configure in Streamlit Secrets."
+    except Exception as e:
+        return f"⚠️ Error: {str(e)}"
+
+def extract_booking_info(chat_response):
+    pattern = r"Pickup: (.+)\nDrop: (.+)\nDate: (.+)\nTime: (.+)"
+    match = re.search(pattern, chat_response)
+    if match:
+        return {
+            "pickup": match.group(1).strip(),
+            "drop": match.group(2).strip(),
+            "date": match.group(3).strip(),
+            "time": match.group(4).strip(),
+            "user_name": "VIP Customer"
+        }
+    return None
+
+# ---------------- STREAMLIT UI ----------------
+st.set_page_config(page_title="ChaufX Concierge", page_icon="🚘")
+st.title("🤖 ChaufX Concierge")
+st.markdown("Your premium chauffeur booking assistant.")
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+user_input = st.chat_input("Type your message...")
+
+if user_input:
+    # Add user message
+    st.session_state.chat_history.append(("You", user_input))
+
+    # Get assistant response (real or mock)
+    reply = safe_chatbot_call(user_input)
+    st.session_state.chat_history.append(("ChaufX Concierge", reply))
+
+    # Extract booking info
+    booking_info = extract_booking_info(reply)
+    if booking_info:
+        confirmation = f"✅ Booking confirmed! Driver: Rajesh Kumar 🚖, Car: Mercedes S-Class"
+        st.session_state.chat_history.append(("ChaufX Concierge", confirmation))
+
+# Render chat
+for role, msg in st.session_state.chat_history:
+    if role == "You":
+        st.chat_message("user").write(msg)
+    else:
+        st.chat_message("assistant").write(msg)
